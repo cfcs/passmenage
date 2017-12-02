@@ -1,0 +1,8 @@
+description = "PassMenage password manager library"
+version = "%%VERSION_NUM%%"
+requires = "cstruct fmt logs nocrypto rresult scrypt yojson"
+archive(byte) = "passmenage.cma"
+plugin(byte) = "passmenage.cma"
+archive(native) = "passmenage.cmxa"
+plugin(native) = "passmenage.cxms"
+exists_if = "passmenage.cma"

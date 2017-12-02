@@ -1,0 +1,19 @@
+S lib
+B _build/lib
+
+# for the cli app:
+PKG bos
+PKG fpath
+
+# for the library:
+PKG cstruct
+PKG logs
+PKG nocrypto
+PKG rresult
+PKG scrypt
+PKG topkg
+PKG yojson
+
+PKG alcotest
+
+FLG -w +A-4-18-41-42-44-48-58

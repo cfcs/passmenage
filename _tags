@@ -1,0 +1,11 @@
+true: color(always), bin_annot, safe_string, principal
+true: warn(+A-4-18-41-42-44-48-58)
+"lib": include
+true: package(cstruct fmt logs nocrypto rresult scrypt yojson)
+
+<lib/*.*>: package(scrypt yojson)
+<pkg/pkg.ml>: package(rresult fmt)
+
+<app/*_cli.*>: package(bos fpath logs.cli logs.fmt fmt.tty fmt.cli nocrypto.unix)
+
+<test/*>: package(alcotest logs.fmt nocrypto.unix scrypt yojson)
