@@ -59,6 +59,32 @@ let do_init _ new_file =
   Passmenage.serialize_state ~pass state >>= fun serialized ->
   file_write ~name:new_file serialized
 
+let put_password_in_xclip pw =
+  (* has xclip, make it delete after first paste *)
+  let pw_as_pipe = Bos.OS.Cmd.in_string pw in
+  Bos.(pw_as_pipe |> OS.Cmd.run_in
+       @@ Cmd.of_list ["xclip"; "-i"; "-l"; "1"; "-selection"; "clipboard"])
+
+let put_password_in_xsel pw =
+  let pw_as_pipe = Bos.OS.Cmd.in_string pw in
+  let timeout = 17 in
+  Printf.eprintf
+    "Waiting for %d seconds, then clearing your password.\n%!" timeout ;
+  Bos.(pw_as_pipe |> OS.Cmd.run_in
+       @@ Cmd.of_list ["xsel";"-ibt";
+                       (string_of_int timeout) ^ "000"])
+  >>| (fun () ->
+      (* TODO: since -t in xsel is broken, we implement the equivalen
+              behaviour manually in here. very nice. thanks guys. *)
+      Unix.sleep timeout ;
+      Bos.(OS.Cmd.run_out @@ Cmd.of_list ["xsel"; "-b"])
+      (* ^-- retrieve clipboard*)
+    ) >>= Bos.OS.Cmd.to_string >>= fun this_the_same_pw ->
+  if this_the_same_pw = pw then (* safe to clear it: *)
+    Bos.(OS.Cmd.run @@ Cmd.of_list ["xsel"; "-bd"])
+  else (* the user overwrote their clipboard; no action taken.*)
+    Ok ()
+
 let do_get _ db_file cat entry_name clipboard_xsel =
   read_db ~db_file >>= fun (_, state) ->
   let open Passmenage in
@@ -69,28 +95,12 @@ let do_get _ db_file cat entry_name clipboard_xsel =
                           decrypt_category ~pass c
   ) >>= fun cat ->
   get_entry cat entry_name >>= fun entry ->
-  begin match clipboard_xsel with
-    | true ->
-      let timeout = 10 in
-      Printf.eprintf "Waiting for %d seconds, then clearing your password.\n%!"
-        timeout ;
-      Bos.(OS.Cmd.run_in (Cmd.of_list ["xsel";"-ibt";
-                                       (string_of_int timeout) ^ "000"])
-           @@ OS.Cmd.in_string entry.passphrase)
-      >>| (fun () ->
-          (* TODO: since -t in xsel is broken, we implement the equivalent
-                  behaviour manually in here. very nice. thanks guys. *)
-        Unix.sleep timeout ;
-        Bos.(OS.Cmd.run_out @@ Cmd.of_list ["xsel"; "-b"])
-        (* ^-- retrieve clipboard*)
-        ) >>= Bos.OS.Cmd.to_string >>= fun this_the_same_pw ->
-      if this_the_same_pw = entry.passphrase then (* safe to clear it: *)
-          Bos.(OS.Cmd.run @@ Cmd.of_list ["xsel"; "-bd"])
-      else (* the user overwrote their clipboard; no action taken.*)
-        Ok ()
+  match clipboard_xsel with
+    | true -> Bos.OS.Cmd.exists @@ Bos.Cmd.of_list ["xclip"]
+      >>= (function | true ->  put_password_in_xclip entry.passphrase
+                    | false -> put_password_in_xsel  entry.passphrase)
     | false ->
       Logs.app (fun m -> m "%s" entry.passphrase) |> R.ok
-  end
 
 let do_list _ db_file opt_cat =
   read_db ~db_file >>= fun (_, state) ->
@@ -185,7 +195,10 @@ let entry, opt_entry =
   in Arg.(required shared, value shared)
 
 let clipboard : bool Cmdliner.Term.t =
-  let doc = {|Place the password in clipboard using `xsel`|} in
+  let doc = {|Place the passphrase in clipboard using `xclip` or `xsel`.
+              With `xclip` the passphrase is erased after the first paste.
+              With `xsel` the passphrase is erased after a 17 second timeout.|}
+  in
   Arg.(value & flag & info ["clipboard"] ~docv:"WATT" ~docs ~doc)
 
 let generate : bool Cmdliner.Term.t =
