@@ -30,7 +30,7 @@ let pp_configuration fmt conf =
     Fmt.(list @@ pair ~sep:(unit ", ") string string) conf
 
 let pp_entry fmt (e:entry) =
-  Fmt.pf fmt "{@[<v>name: %S,@ passphrase: %S,@ metadata: [%a]@]}"
+  Fmt.pf fmt "{@[<v>\"name\": %S,@ \"passphrase\": %S,@ \"metadata\": [%a]@]}"
     e.name e.passphrase
     Fmt.(list @@ pair ~sep:(unit ", ") string string) e.metadata
 
@@ -38,14 +38,15 @@ let pp_crypto_key fmt (_:string) = Fmt.pf fmt "[ENCRYPTION KEY]"
 let pp_category fmt c: unit =
   match c with
   | Crypt_category c ->
-    Fmt.pf fmt "{name: %S;@ entries: ENCRYPTED}" c.name
+    Fmt.pf fmt "{\"name\": %S,@ \"entries\": \"ENCRYPTED\"}" c.name
   | Plain_category c ->
-    Fmt.pf fmt "{@[<v>name: %S,@ entries: @[<v>%a@],@ key: %a@]}" c.name
-      Fmt.(list pp_entry) c.entries
-      Fmt.(option ~none:(unit "Empty") pp_crypto_key) c.encryption_key
+    Fmt.pf fmt "{@[<v>\"name\": %S,@ \"entries\": [@[<v>%a@]],\
+                                   @ \"key\": %a@]}" c.name
+      Fmt.(list ~sep:(unit ",@,") pp_entry) c.entries
+      Fmt.(option ~none:(unit "\"\"") pp_crypto_key) c.encryption_key
 
 let pp_state fmt s =
-  Fmt.pf fmt "{@[state =@, conf: @[<v>%a@]@,categories: @[<v>%a@]@]}"
+  Fmt.pf fmt "{@[\"conf\": @[<v>%a@],@,\"categories\": @[<v>%a@]@]}"
     pp_configuration s.conf
     Fmt.(list pp_category) s.categories
 

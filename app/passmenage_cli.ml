@@ -11,9 +11,10 @@ let file_write ~name data = Fpath.of_string name >>= fun path ->
 
 let prompt_password ?prompt () : string =
   if Unix.isatty (Unix.descr_of_in_channel stdin)
+  then Printf.eprintf "%s: %!" (match prompt with Some x -> x
+                                                | None -> "Enter password") ;
+  if Unix.isatty (Unix.descr_of_out_channel stdout)
   then begin
-    Printf.eprintf "%s: %!" (match prompt with Some x -> x
-                                           | None -> "Enter password");
     let open Unix in
     let attr = tcgetattr stdout in
     tcsetattr stdout TCSAFLUSH
@@ -42,7 +43,6 @@ let read_db ~db_file =
   (pass, state)
 
 let do_prettyprint _ db_file =
-  Logs.app (fun m -> m "%s" db_file) ;
   read_db ~db_file >>= fun (_key , state) ->
   Logs.app (fun m -> m "%a" Passmenage.pp_state state); Ok ()
 
