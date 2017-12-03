@@ -9,10 +9,11 @@ let file_exists name = Fpath.of_string name >>= Bos.OS.File.exists
 let file_write ~name data = Fpath.of_string name >>= fun path ->
   Bos.OS.File.write path data
 
-let enter_password () : string =
+let prompt_password ?prompt () : string =
   if Unix.isatty (Unix.descr_of_in_channel stdin)
   then begin
-    Printf.eprintf "Enter password: %!" ;
+    Printf.eprintf "%s: %!" (match prompt with Some x -> x
+                                           | None -> "Enter password");
     let open Unix in
     let attr = tcgetattr stdout in
     tcsetattr stdout TCSAFLUSH
@@ -27,9 +28,16 @@ let enter_password () : string =
   Logs.debug (fun m -> m "read: %S" pw);
   pw
 
+let enter_password_confirm ?prompt () : (string, [> R.msg]) result =
+  let pw = prompt_password ?prompt () in
+  let confirm = prompt_password ~prompt:"Confirm" () in
+  if pw = confirm
+  then Ok pw
+  else R.error_msg "Password mismatch"
+
 let read_db ~db_file =
   file_read db_file >>= fun content ->
-  enter_password () |> fun pass ->
+  prompt_password ~prompt:"Enter password for state file" () |> fun pass ->
   Passmenage.unserialize_state ~pass content >>| fun state ->
   (pass, state)
 
@@ -47,21 +55,27 @@ let do_init _ new_file =
   ) >>= fun () ->
   let open Passmenage in
   let state = {conf = []; categories = []} in
-  enter_password () |> fun pass ->
+  enter_password_confirm () >>= fun pass ->
   Passmenage.serialize_state ~pass state >>= fun serialized ->
   file_write ~name:new_file serialized
 
-let do_get _ db_file cat entry_name =
+let do_get _ db_file cat entry_name clipboard_xsel =
   read_db ~db_file >>= fun (_, state) ->
   let open Passmenage in
   get_category state cat >>=
   (function
     | Plain_category c -> Ok c
-    | Crypt_category c -> let pass = enter_password () in
+    | Crypt_category c -> let pass = prompt_password () in
                           decrypt_category ~pass c
   ) >>= fun cat ->
-  get_entry cat entry_name >>| fun entry ->
-  Logs.app (fun m -> m "%a" pp_entry entry)
+  get_entry cat entry_name >>= fun entry ->
+  begin match clipboard_xsel with
+    | true ->
+      let io_pw = Bos.OS.Cmd.in_string entry.passphrase in
+      Bos.OS.Cmd.run_in (Bos.Cmd.of_list ["xsel";"-ibt";"30000"]) io_pw
+    | false ->
+      Logs.app (fun m -> m "%s" entry.passphrase) |> R.ok
+  end
 
 let do_list _ db_file opt_cat =
   read_db ~db_file >>= fun (_, state) ->
@@ -75,7 +89,7 @@ let do_list _ db_file opt_cat =
     | Some cat_name ->
       get_category state cat_name
       >>= ( function
-          | Crypt_category c -> let pass = enter_password () in
+          | Crypt_category c -> let pass = prompt_password () in
                                 decrypt_category ~pass c
           | Plain_category c -> Ok c
         ) >>| fun (cat : plain_category) ->
@@ -100,8 +114,9 @@ let do_add _ db_file cat entry_name generate charset =
        (new_cat, new_state)
     | Ok (Plain_category category) -> Ok (category, state)
     | Ok (Crypt_category c) ->
-      Logs.app (fun m -> m "Category %s is encrypted." c.name);
-      let pass = enter_password () in
+      let pass = prompt_password
+          ~prompt:("Enter password for category '" ^ c.name ^ "'")
+          () in
       decrypt_category ~pass c >>| fun c ->
       (c, state)
   end >>= fun (category, state) ->
@@ -110,15 +125,16 @@ let do_add _ db_file cat entry_name generate charset =
                  entry_name category.name
      | Error _ -> Ok ()
   end >>= fun () ->
+  (if generate
+   then generate_password 16
+       (match charset with
+        | Some sets -> List.(flatten sets |> sort_uniq compare)
+        | None -> alphanum)
+   else enter_password_confirm ~prompt:"Enter new password" ()
+  ) >>= fun passphrase ->
   insert_new_entry category
        { name = entry_name ;
-         passphrase = if generate
-           then generate_password 16
-               (match charset with
-                | Some sets -> List.(flatten sets |> sort_uniq compare)
-                | None -> alphanum)
-                |> R.get_ok
-           else enter_password () ;
+         passphrase ;
          metadata = [];
        }
   >>| (fun cat -> update_category state cat)
@@ -152,6 +168,10 @@ let entry, opt_entry =
   let shared = Arg.(opt (some string) None
                     & info ["entry"] ~docv:"ENTRY" ~docs ~doc)
   in Arg.(required shared, value shared)
+
+let clipboard : bool Cmdliner.Term.t =
+  let doc = {|Place the password in clipboard using `xsel`|} in
+  Arg.(value & flag & info ["clipboard"] ~docv:"WATT" ~docs ~doc)
 
 let generate : bool Cmdliner.Term.t =
   let doc = {| Automatically generate a password |} in
@@ -188,7 +208,7 @@ let setup_log =
                          $ Logs_cli.level ~docs:sdocs ())
 
 let cmd_add =
-  let doc = {|doc something TODO|} in
+  let doc = {|Add an entry to a category.|} in
   let man =
     [ `S Manpage.s_synopsis ;
       `P {|$(tname) --db $(i,FILE) --cat $(i,CATEGORY) --ent $(i,ENTRY) \
@@ -224,7 +244,8 @@ let cmd_get =
               `P {| yo lo |}
   ] in
   Term.(term_result (const do_get $ setup_log
-                                  $ db_file $ category $ entry)),
+                     $ db_file $ category $ entry
+                     $ clipboard)),
   Term.info "get" ~doc ~sdocs ~exits:Term.default_exits ~man
 
 let cmd_list =
