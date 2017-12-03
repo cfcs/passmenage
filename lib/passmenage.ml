@@ -30,7 +30,7 @@ let pp_configuration fmt conf =
     Fmt.(list @@ pair ~sep:(unit ", ") string string) conf
 
 let pp_entry fmt (e:entry) =
-  Fmt.pf fmt "{@[<v>name: %S;@ passphrase: %S;@ metadata: [%a]@]}"
+  Fmt.pf fmt "{@[<v>name: %S,@ passphrase: %S,@ metadata: [%a]@]}"
     e.name e.passphrase
     Fmt.(list @@ pair ~sep:(unit ", ") string string) e.metadata
 
@@ -40,7 +40,7 @@ let pp_category fmt c: unit =
   | Crypt_category c ->
     Fmt.pf fmt "{name: %S;@ entries: ENCRYPTED}" c.name
   | Plain_category c ->
-    Fmt.pf fmt "{@[<v>name: %S;@ entries: @[<v>%a@]@ key: %a@]}" c.name
+    Fmt.pf fmt "{@[<v>name: %S,@ entries: @[<v>%a@],@ key: %a@]}" c.name
       Fmt.(list pp_entry) c.entries
       Fmt.(option ~none:(unit "Empty") pp_crypto_key) c.encryption_key
 
@@ -300,10 +300,10 @@ let get_entry {entries; _} entry_name =
   try List.find (fun (e:entry) -> e.name = entry_name) entries |> R.ok
   with Not_found -> R.error_msg "get_entry: no such entry"
 
-let numbers = Array.init 10 (fun i -> Char.chr (0x30+i)) |> Array.to_list
+let decimals = Array.init 10 (fun i -> Char.chr (0x30+i)) |> Array.to_list
 let upper = Array.init 26 (fun i -> Char.chr (0x41+i)) |> Array.to_list
 let lower = Array.init 26 (fun i -> Char.chr (0x61+i)) |> Array.to_list
-let alphanum = upper @ lower @ numbers
+let alphanum = upper @ lower @ decimals
 let symbols = ['!'; '#'; '~'; '$'; '%'; '&'; '*'; '-';
                '('; ')'; '_'; '?'; '+'; '/'; '@'; '^'; ]
 let all_chars = symbols @ alphanum

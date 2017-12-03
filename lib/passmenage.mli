@@ -48,7 +48,7 @@ val generate_password :
 (** [generate_password length alphabet] generates a string of [length]
     characters randomly picked from [alphabet].*)
 
-val numbers : char list
+val decimals : char list
 (** See {{!generate_password}generate_password}.
     The set of decimals from [0-9].*)
 
@@ -62,7 +62,7 @@ val lower : char list
 
 val alphanum : char list
 (** See {{!generate_password}generate_password}.
-    The set consisting of [numbers] @ [upper] @ [lower] *)
+    The set consisting of [decimals] @ [upper] @ [lower] *)
 
 val symbols : char list
 (** See {{!generate_password}generate_password}.
