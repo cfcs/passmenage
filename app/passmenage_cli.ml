@@ -245,12 +245,8 @@ let setup_log =
 let cmd_add =
   let doc = {|Add an entry to a category.|} in
   let man =
-    [ `S Manpage.s_synopsis ;
-      `P {|$(tname) $(i,CATEGORY) $(i,ENTRY) \
-          [$(i,OPTIONS)] |} ;
-      `S Manpage.s_description ;
-      `P {|Add stuff to your password file|} ;
-
+    [ `S Manpage.s_description ;
+      `P {|Add a password entry to your password file.|} ;
     ] in
   Term.(term_result
           (const do_add $ setup_log
@@ -271,9 +267,7 @@ let cmd_init =
   let doc = {|Initialize a new password file|} in
   let man =
     [ `S Manpage.s_description ;
-      `P
-        (Fmt.strf {|This initializes a new password file.
-
+      `P (Fmt.strf {|
            The optional argument $(i,--db) may be used to override the default
            location which is %a|} Fpath.pp default_db_file)
     ]
@@ -284,7 +278,8 @@ let cmd_init =
 let cmd_get =
   let doc = {|Get an entry from the password file.|} in
   let man = [ `S Manpage.s_description ;
-              `P {| yo lo |}
+              `P {|Prints a password to $(i,STDOUT) if the optional argument
+                   $(i,--clipboard) is not given.|}
   ] in
   Term.(term_result (const do_get $ setup_log
                      $ db_file $ category $ entry
@@ -292,7 +287,7 @@ let cmd_get =
   Term.info "get" ~doc ~sdocs ~exits:Term.default_exits ~man
 
 let cmd_list =
-  let doc = {||} in
+  let doc = {|List categories, or entries in a specific category|} in
   let man = [] in
   Term.(term_result (const do_list $ setup_log
                                    $ db_file $ opt_category)),

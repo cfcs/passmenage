@@ -12,10 +12,21 @@ is provided in [./app/passmenage_cli.ml].
 
 The binary provides the following sub-commands:
 ```
-init
-add
-get
-pretty-print
+COMMANDS
+       add
+           Add an entry to a category.
+
+       get
+           Get an entry from the password file.
+
+       init
+           Initialize a new password file
+
+       list
+           List categories, or entries in a specific category
+
+       pretty-print
+           Pretty-print the state (INCLUDING PASSWORDS)
 ```
 
 A manpage is available with `./passmenage_cli.native --help`
@@ -78,7 +89,7 @@ and the result is stored in a JSON object:
 { /* OCaml struct name: `encrypted_data` */
   kdf: "scrypt...", /* the output from scrypt_enc_buf() */
 
-  nonce: "AAAAAA", /* 32-byte random value/*
+  nonce: "AAAAAA", /* 32-byte random value */
 
   ciphertext: "BBBBBB", /* ciphertext and MAC from AES-CCM */
 }
@@ -86,7 +97,7 @@ and the result is stored in a JSON object:
 
 ## Using the library
 
-The [mli interface specification](./lib/passmenage.mli] contains most of the
+The [mli interface specification](./lib/passmenage.mli) contains most of the
 information needed to use the library.
 
 A nice HTML representation can be generated using `topkg doc` if you have the
