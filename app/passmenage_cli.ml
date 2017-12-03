@@ -1,13 +1,8 @@
 open Rresult
 
 let file_read name =
-  Fpath.of_string name >>= Bos.OS.File.read
-  |> R.reword_error (fun _ -> `Msg "Can't open file for reading")
-
-let file_exists name = Fpath.of_string name >>= Bos.OS.File.exists
-
-let file_write ~name data = Fpath.of_string name >>= fun path ->
-  Bos.OS.File.write path data
+  Bos.OS.File.read name
+  |> R.reword_error (fun _ -> R.msgf "Can't open %a for reading" Fpath.pp name)
 
 let prompt_password ?prompt () : string =
   if Unix.isatty (Unix.descr_of_in_channel stdin)
@@ -42,22 +37,23 @@ let read_db ~db_file =
   Passmenage.unserialize_state ~pass content >>| fun state ->
   (pass, state)
 
-let do_prettyprint _ db_file =
+let do_prettyprint _ (db_file:Fpath.t) =
   read_db ~db_file >>= fun (_key , state) ->
   Logs.app (fun m -> m "%a" Passmenage.pp_state state); Ok ()
 
-let do_init _ new_file =
+let do_init _ (new_file:Fpath.t) =
   Logs.app (fun m -> m "Hello, I'm your password manager, I'm going to \
-                        initialize a new password file in %S" new_file);
-  (file_exists new_file >>= function
-    | true -> R.error_msg ("File '"^new_file^"'exists")
+                        initialize a new password file in %a"
+               Fpath.pp new_file);
+  (Bos.OS.File.exists new_file >>= function
+    | true -> R.error_msgf "File %a exists" Fpath.pp new_file
     | false -> Ok ()
   ) >>= fun () ->
   let open Passmenage in
   let state = {conf = []; categories = []} in
   enter_password_confirm () >>= fun pass ->
   Passmenage.serialize_state ~pass state >>= fun serialized ->
-  file_write ~name:new_file serialized
+  Bos.OS.File.write new_file serialized
 
 let put_password_in_xclip pw =
   (* has xclip, make it delete after first paste *)
@@ -155,7 +151,7 @@ let do_add _ db_file cat entry_name generate charset =
        (match charset with
         | Some sets -> List.(flatten sets |> sort_uniq compare)
         | None -> alphanum)
-   else enter_password_confirm ~prompt:"Enter new password" ()
+   else enter_password_confirm ~prompt:"Enter password to store" ()
   ) >>= fun passphrase ->
   insert_new_entry category
        { name = entry_name ;
@@ -165,34 +161,45 @@ let do_add _ db_file cat entry_name generate charset =
   >>| (fun cat -> update_category state cat)
   >>| (fun s -> Logs.info (fun m -> m "%a" pp_state s); s)
   >>= serialize_state ~pass
-  >>= file_write ~name:db_file
+  >>= Bos.OS.File.write db_file
 
 open Cmdliner
 
 let docs = Manpage.s_options
 let sdocs = Manpage.s_common_options
 
+let default_db_file = Fpath.append
+    (Bos.OS.Dir.user () |> R.get_ok)
+    (Fpath.of_string ".config/passmenage.store" |> R.get_ok)
+
+let fpath_conv : Fpath.t Cmdliner.Arg.conv =
+  (fun x -> match Fpath.of_string x with
+     | Ok a -> `Ok a
+     | Error (`Msg m) -> `Error m
+  ), Fpath.pp
+
 let db_file =
-  let doc = {| Some doc for db |} in
-  Arg.(required & opt (some non_dir_file) None
-                & info ["db"] ~docv:"FILE" ~docs ~doc)
+  let doc = {|The path to the password database file|} in
+  Arg.(value & opt fpath_conv default_db_file
+       & info ["db"] ~docv:"FILE" ~docs ~doc)
 
 let blank_file =
-  let doc = {| a non-existant file to write |} in
-  Arg.(required & opt (some string) None
-                & info ["db"] ~docv:"FILE" ~docs ~doc)
+  let doc = {| A non-existant file to write |} in
+  Arg.(value & opt fpath_conv default_db_file
+             & info ["db"] ~docv:"FILE" ~docs ~doc)
 
-let category, opt_category =
+let (category : string  Cmdliner.Term.t),
+     opt_category (* : string Cmdliner.Term.t*) =
   let doc = {| A category name |} in
-  let shared = Arg.(opt (some string) None
-                    & info ["category"] ~docv:"CAT" ~docs ~doc)
-  in Arg.(required shared, value shared)
+  Arg.(
+    required & pos 0 (some string) None & info [] ~docv:"CATEGORY" ~docs ~doc,
+    value & pos 0 (some string) None & info [] ~docv:"CATEGORY" ~docs ~doc)
 
 let entry, opt_entry =
   let doc = {| A password entry name |} in
-  let shared = Arg.(opt (some string) None
-                    & info ["entry"] ~docv:"ENTRY" ~docs ~doc)
-  in Arg.(required shared, value shared)
+  Arg.(
+    required & pos 1 (some string) None & info [] ~docv:"ENTRY-NAME" ~docs ~doc,
+    value & pos 1 (some string) None & info [] ~docv:"ENTRY-NAME" ~docs ~doc)
 
 let clipboard : bool Cmdliner.Term.t =
   let doc = {|Place the passphrase in clipboard using `xclip` or `xsel`.
@@ -239,7 +246,7 @@ let cmd_add =
   let doc = {|Add an entry to a category.|} in
   let man =
     [ `S Manpage.s_synopsis ;
-      `P {|$(tname) --db $(i,FILE) --cat $(i,CATEGORY) --ent $(i,ENTRY) \
+      `P {|$(tname) $(i,CATEGORY) $(i,ENTRY) \
           [$(i,OPTIONS)] |} ;
       `S Manpage.s_description ;
       `P {|Add stuff to your password file|} ;
@@ -251,18 +258,26 @@ let cmd_add =
   Term.info "add" ~doc ~sdocs ~exits:Term.default_exits ~man
 
 let cmd_prettyprint =
-  let doc = {||} in
-  let man = [ `S Manpage.s_description ;
-              `P {| yo lo |}
+  let doc = {|Pretty-print the state (INCLUDING PASSWORDS) |} in
+  let man =
+    [ `S Manpage.s_description ;
+      `P {|Pretty-print the entire state (including passwords) in JSON.
+           This can be used to export your passwords.|}
   ] in
   Term.(term_result (const do_prettyprint $ setup_log $ db_file)),
   Term.info "pretty-print" ~doc ~sdocs ~exits:Term.default_exits ~man
 
 let cmd_init =
   let doc = {|Initialize a new password file|} in
-  let man = [ `S Manpage.s_description ;
-              `P {| yo lo |}
-  ] in
+  let man =
+    [ `S Manpage.s_description ;
+      `P
+        (Fmt.strf {|This initializes a new password file.
+
+           The optional argument $(i,--db) may be used to override the default
+           location which is %a|} Fpath.pp default_db_file)
+    ]
+  in
   Term.(term_result (const do_init $ setup_log $ blank_file)),
   Term.info "init" ~doc ~sdocs ~exits:Term.default_exits ~man
 

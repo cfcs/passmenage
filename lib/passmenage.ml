@@ -46,7 +46,7 @@ let pp_category fmt c: unit =
       Fmt.(option ~none:(unit "\"\"") pp_crypto_key) c.encryption_key
 
 let pp_state fmt s =
-  Fmt.pf fmt "{@[\"conf\": @[<v>%a@],@,\"categories\": @[<v>%a@]@]}"
+  Fmt.pf fmt "{@[\"configuration\": @[<v>%a@],@,\"categories\": [@[<v>%a@]]@]}"
     pp_configuration s.conf
     Fmt.(list pp_category) s.categories
 
@@ -264,7 +264,7 @@ let insert_new_category {conf;categories = old_cats} new_cat
   : (state, [> R.msg]) result =
   begin if List.exists (fun c ->
       name_of_category c = name_of_category new_cat) old_cats
-    then R.error_msg "category already exists"
+    then R.error_msgf "category %S already exists" (name_of_category new_cat)
     else R.ok (new_cat :: old_cats)
   end >>| fun categories -> {conf; categories}
 
@@ -280,11 +280,11 @@ let update_category {conf; categories = old_cats} (new_cat:plain_category) =
 
 let get_category {categories; conf = _} cat_name  =
   try List.find (fun c -> name_of_category c = cat_name) categories |> R.ok
-  with Not_found -> R.error_msg "get_category: no such category"
+  with Not_found -> R.error_msgf "get_category: no such category: %S" cat_name
 
 let insert_new_entry ({entries; _} as cat) (entry:entry) =
   if List.exists (fun (e:entry) -> e.name = entry.name) entries
-  then R.error_msg "insert_entry: entry already exists"
+  then R.error_msgf "insert_entry: entry %S already exists" entry.name
   else
     Ok { cat with
          entries = entry::entries
@@ -299,7 +299,7 @@ let update_entry ({entries;_} as cat) (entry:entry) =
 
 let get_entry {entries; _} entry_name =
   try List.find (fun (e:entry) -> e.name = entry_name) entries |> R.ok
-  with Not_found -> R.error_msg "get_entry: no such entry"
+  with Not_found -> R.error_msgf "get_entry: no such entry: %S" entry_name
 
 let decimals = Array.init 10 (fun i -> Char.chr (0x30+i)) |> Array.to_list
 let upper = Array.init 26 (fun i -> Char.chr (0x41+i)) |> Array.to_list
