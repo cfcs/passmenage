@@ -71,8 +71,23 @@ let do_get _ db_file cat entry_name clipboard_xsel =
   get_entry cat entry_name >>= fun entry ->
   begin match clipboard_xsel with
     | true ->
-      let io_pw = Bos.OS.Cmd.in_string entry.passphrase in
-      Bos.OS.Cmd.run_in (Bos.Cmd.of_list ["xsel";"-ibt";"30000"]) io_pw
+      let timeout = 10 in
+      Printf.eprintf "Waiting for %d seconds, then clearing your password.\n%!"
+        timeout ;
+      Bos.(OS.Cmd.run_in (Cmd.of_list ["xsel";"-ibt";
+                                       (string_of_int timeout) ^ "000"])
+           @@ OS.Cmd.in_string entry.passphrase)
+      >>| (fun () ->
+          (* TODO: since -t in xsel is broken, we implement the equivalent
+                  behaviour manually in here. very nice. thanks guys. *)
+        Unix.sleep timeout ;
+        Bos.(OS.Cmd.run_out @@ Cmd.of_list ["xsel"; "-b"])
+        (* ^-- retrieve clipboard*)
+        ) >>= Bos.OS.Cmd.to_string >>= fun this_the_same_pw ->
+      if this_the_same_pw = entry.passphrase then (* safe to clear it: *)
+          Bos.(OS.Cmd.run @@ Cmd.of_list ["xsel"; "-bd"])
+      else (* the user overwrote their clipboard; no action taken.*)
+        Ok ()
     | false ->
       Logs.app (fun m -> m "%s" entry.passphrase) |> R.ok
   end
