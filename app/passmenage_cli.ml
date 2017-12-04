@@ -291,7 +291,7 @@ let cmd_list =
   let man = [] in
   Term.(term_result (const do_list $ setup_log
                                    $ db_file $ opt_category)),
-  Term.info "list" ~doc ~docs ~exits:Term.default_exits ~man
+  Term.info "list" ~doc ~sdocs ~exits:Term.default_exits ~man
 
 let cmd_help =
   let doc = {|$(mname) is a command-line interface to the PassMenage password
