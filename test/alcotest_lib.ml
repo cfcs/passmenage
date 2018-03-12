@@ -8,8 +8,10 @@ let () =
   Logs.(set_level @@ Some Debug)
 
 let entry = {passphrase = "foo"; name = "my pass" ; metadata = ["a","b"]}
-let plain_cat = {name="cat name"; entries = [entry]; encryption_key = None}
+let plain_cat = {name="cat name"; entries = [entry];
+                 subcategories = [] ; encryption_key = None}
 let crypt_cat = {name="cryptocat"; entries = [entry];
+                 subcategories = [] ;
                  encryption_key = Some (generate_password 10 all_chars
                                         |> R.get_ok)
                 }

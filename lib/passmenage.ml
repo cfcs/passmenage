@@ -10,16 +10,16 @@ type entry = { name: string ;
                metadata: (string * string) list
              }
 
+type crypt_category = { name : string ;
+                        category_ciphertext : encrypted_data ;}
+
 type plain_category = { name : string ;
                         entries : entry list ;
+                        subcategories : category list;
                         encryption_key : string option;
                       }
-
-type crypt_category = { name : string ;
-                        encrypted_entries : encrypted_data ;}
-
-type category = Plain_category of plain_category
-              | Crypt_category of crypt_category
+and category = Plain_category of plain_category
+             | Crypt_category of crypt_category
 
 type state = { conf : configuration ;
                categories: category list ;
@@ -114,20 +114,25 @@ let name_of_category
   | Crypt_category {name; _} -> name
   | Plain_category {name; entries = _; _} -> name
 
-let json_of_category (cat: category) : Yojson.Basic.json =
+let rec json_of_category (cat: category) : Yojson.Basic.json =
+  let wrap_encrypted v =
+    ["category_ciphertext", v]
+  in
   begin match cat with
-    | Plain_category {entries; encryption_key; name = _} ->
+    | Plain_category {entries; subcategories; encryption_key; name = _} ->
       let plain_entries = `List (List.map json_of_entry entries) in
       begin match encryption_key with
-      | None -> plain_entries
-      | Some pass -> json_of_encrypted_data (encrypt ~pass plain_entries |> R.get_ok) (*TODO*)
+        | None ->
+          [ "entries", plain_entries ;
+            "subcategories", `List (List.map json_of_category subcategories)]
+      | Some pass ->
+        json_of_encrypted_data (encrypt ~pass plain_entries |> R.get_ok) (*TODO*)
+        |> wrap_encrypted
       end
-    | Crypt_category {encrypted_entries; name = _} ->
-      json_of_encrypted_data encrypted_entries
+    | Crypt_category {category_ciphertext; name = _ } ->
+      wrap_encrypted (json_of_encrypted_data category_ciphertext)
   end |> fun serialized ->
-  `Assoc [ "name", `String (name_of_category cat) ;
-           "entries", serialized ;
-         ]
+  `Assoc (("name", `String (name_of_category cat))::serialized)
 
 let fold_result f lst =
   let rec loop acc = function
@@ -166,6 +171,10 @@ let get_json_str = function
   | `String s -> Ok s
   | _ -> R.error_msg "json must be str" (* TODO pp error?*)
 
+let get_json_list = function
+  | `List lst -> Ok lst
+  | _ -> R.error_msg "json must be list" (* TODO pp error?*)
+
 let entry_of_json json =
   begin match json with
     | `Assoc lst ->
@@ -190,21 +199,23 @@ let encrypted_data_of_json
     | json -> R.error_msg (Fmt.strf "invalid encrypted_data json: %a"
                           Yojson.Basic.(pretty_print ~std:true) json)
 
-let category_of_json (json:Yojson.Basic.json)
+let rec category_of_json (json:Yojson.Basic.json)
   : (category, [> R.msg ]) result =
   match json with
-    | `Assoc (["name", `String name; "entries", what_entries]
-             |["entries", what_entries; "name", `String name]) ->
-      begin match what_entries with
-        | `List u_entries -> (* it's unencrypted *)
-          fold_result entry_of_json u_entries >>| fun entries ->
-          Plain_category {name; entries; encryption_key = None}
-        | (`Assoc _) as probably_enc ->
-          encrypted_data_of_json probably_enc >>| fun encrypted_entries ->
-          Crypt_category {name; encrypted_entries}
-        | _ -> R.error_msg "entry list in category json is invalid"
-      end
-    | _ -> R.error_msg "invalid category json"
+  | `Assoc ( ["name", `String name ; "category_ciphertext", enc_data]
+           | ["category_ciphertext", enc_data ; "name", `String name]) ->
+    encrypted_data_of_json enc_data >>| fun category_ciphertext ->
+    Crypt_category {name; category_ciphertext}
+  | `Assoc member_assoc -> (* it's unencrypted *)
+    three_assoc_of_json ("name", "entries", "subcategories")
+      (get_json_str, get_json_list, get_json_list) member_assoc
+    |> R.reword_error_msg (fun _ -> `Msg "malformed category json")
+    >>= fun (name, entries, subcategories) ->
+    fold_result category_of_json subcategories >>= fun subcategories ->
+    fold_result entry_of_json entries >>| fun entries ->
+    Plain_category { name ; entries; encryption_key = None;
+                     subcategories ; }
+  | _ -> R.error_msg "invalid category json"
 
 let json_of_state {conf; categories} =
   `Assoc [ "configuration", json_of_configuration conf ;
@@ -236,20 +247,26 @@ let unserialize_state ~pass str =
   | json ->
     encrypted_data_of_json json >>= decrypt_state ~pass
 
-let encrypt_category ({name;entries; encryption_key})
+let encrypt_category ({name; entries; subcategories; encryption_key})
   : (crypt_category, 'err) result =
   match encryption_key with
   | None -> R.error_msg "encrypt_category: no encryption key provided"
   | Some pass ->
-    Ok {name;
-        encrypted_entries =
-          encrypt ~pass (`List (List.map json_of_entry entries)) |> R.get_ok} (*TODO*)
+    Ok {name ;
+        category_ciphertext =
+          encrypt ~pass
+            (`Assoc
+               ["entries", `List (List.map json_of_entry entries) ;
+                "subcategories", `List (List.map json_of_category subcategories)
+               ])
+          |> R.get_ok} (*TODO*)
 
-let decrypt_category ~pass ({name; encrypted_entries}) =
-  decrypt ~pass encrypted_entries >>= begin function
-    | `List json_ent_lst ->
+let decrypt_category ~pass ({name; category_ciphertext}) =
+  decrypt ~pass category_ciphertext >>= begin function
+    | `Assoc ["entries", `List json_ent_lst;
+              "subcategories", `List json_subcat_lst ] ->
       fold_result entry_of_json json_ent_lst >>| fun entries ->
-      {name; entries; encryption_key = Some pass}
+      {name; entries; encryption_key = Some pass; subcategories = [] }
     | _ -> R.error_msg "fucked json after decrypting json"
   end
 

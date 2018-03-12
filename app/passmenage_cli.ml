@@ -129,6 +129,7 @@ let do_add _ db_file cat entry_name generate charset =
      | Error _ ->
        let new_cat = { name = cat ;
                        entries = [] ;
+                       subcategories = [] ;
                        encryption_key = None ;
                      } in
        insert_new_category state (Plain_category new_cat) >>| fun new_state ->

@@ -21,5 +21,7 @@ depends: [
   "scrypt"
   "yojson"     { >= "1.4.0" & < "1.5.0" }
   "cmdliner"   { >= "1.0.2" & < "1.1.0" }
+  "bos"        { >= "0.2.0" & < "0.3.0" }
+  "fpath"      { >= "0.7.2" & < "0.8.0" }
 ]
 available: [ocaml-version >= "4.04.2"]

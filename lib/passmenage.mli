@@ -12,19 +12,19 @@ type entry =
     metadata: (string * string) list ; (** Application-defined metadata *)
   }
 
+type crypt_category = { name : string ;
+                        category_ciphertext : encrypted_data ;}
+
 type plain_category =
   { name : string ;
     entries : entry list ;
+    subcategories: category list ;
     encryption_key : string option ;
     (** if set, the category will be encrypted with the passphrase when the
         category is serialized.*)
   }
-
-type crypt_category = { name : string ;
-                        encrypted_entries : encrypted_data ;}
-
-type category = Plain_category of plain_category
-              | Crypt_category of crypt_category
+and category = Plain_category of plain_category
+             | Crypt_category of crypt_category
 
 type state = { conf : configuration ;
                categories: category list ;
