@@ -18,7 +18,10 @@ depends: [
   "rresult"
   "nocrypto"   { >= "0.5.4" & < "0.6.0" }
   "logs"       { >= "0.6.2" & < "0.7.0" }
+
   "scrypt"
+  "ctypes-foreign" # scrypt fails to declare this dependency
+
   "yojson"     { >= "1.4.0" & < "1.5.0" }
   "cmdliner"   { >= "1.0.2" & < "1.1.0" }
   "bos"        { >= "0.2.0" & < "0.3.0" }
