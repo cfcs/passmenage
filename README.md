@@ -1,4 +1,5 @@
 # Work-in-progress: PassMenage
+![Build status](https://travis-ci.org/cfcs/passmenage.svg?branch=master)
 
 This is a password manager library implementing basic operations on a data
 structure that can be used to store passwords.
@@ -43,23 +44,24 @@ The internal data structure is a JSON tree:
     ["entry 2", "value 2"],
   ],
 
-  categories: /* list of associative dictionaries */
+  categories: /* list of associative dictionaries, which may be nested */
   [
     { /* OCaml struct name: `category` */
       /* each category may optionally be encrypted with a separate key */
       name: "category 1",
       entries: /* list of associative dictionaries */
-      [
-        { /* OCaml struct name: `entry` */
-	  name: "my github password",
-	  passphrase: "123456",
-	  metadata:
-	  [ /* list of string tuples */
-	    ["url", "https://github.com/signin"],
-	    ["last_changed", "2017-12-01"],
-	  ]
-	},
-      ]
+        [
+          { /* OCaml struct name: `entry` */
+            name: "my github password",
+            passphrase: "123456",
+            metadata:
+              [ /* list of string tuples */
+                ["url", "https://github.com/signin"],
+                ["last_changed", "2017-12-01"],
+              ]
+          },
+        ],
+      subcategories: [] /* a list of `category` objects */
     },
   ]
 }
