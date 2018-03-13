@@ -74,7 +74,9 @@ date loaded in memory during a given session.
 The encryption is performed using
 [Nocrypto](https://github.com/mirleft/ocaml-nocrypto)'s
 [AES-CCM](https://en.wikipedia.org/wiki/CCM_mode) primitive with a 128-bit MAC
-, a random 256-bit key, and a random 104-bit nonce. New random values for the key and nonce are generated on each serialization/encryption.
+, a random 256-bit key, and a random 104-bit nonce.
+New random values for the key and nonce are generated on each
+serialization/encryption.
 I couldn't find any documentation that references a standardized instance
 of AES-CCM in `nocrypto`, so there's no telling what actually goes on under
 the hood inside this library without reading the source code, which I'm not
