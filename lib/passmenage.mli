@@ -8,7 +8,7 @@ type configuration = (string * string) list
 
 type entry =
   { name: string ; (** A user-defined name. Must be unique in a category. *)
-    passphrase: string ; (** The stored password. *)
+    passphrase: string ; (** The stored passphrase. *)
     metadata: (string * string) list ; (** Application-defined metadata *)
   }
 
@@ -41,35 +41,35 @@ val pp_category : Format.formatter -> category -> unit
 
 val pp_state : Format.formatter -> state -> unit
 
-(** {1:new_passwords Generating new passwords} *)
+(** {1:new_passphrases Generating new passphrases} *)
 
-val generate_password :
+val generate_passphrase :
   int -> char list -> (string, [> R.msg ]) result
-(** [generate_password length alphabet] generates a string of [length]
+(** [generate_passphrase length alphabet] generates a string of [length]
     characters randomly picked from [alphabet].*)
 
 val decimals : char list
-(** See {{!generate_password}generate_password}.
+(** See {{!generate_passphrase}generate_passphrase}.
     The set of decimals from [0-9].*)
 
 val upper : char list
-(** See {{!generate_password}generate_password}.
+(** See {{!generate_passphrase}generate_passphrase}.
     The set of uppercase letters from [A-Z]. *)
 
 val lower : char list
-(** See {{!generate_password}generate_password}.
+(** See {{!generate_passphrase}generate_passphrase}.
     The set of lowercase letters from [a-z]. *)
 
 val alphanum : char list
-(** See {{!generate_password}generate_password}.
+(** See {{!generate_passphrase}generate_passphrase}.
     The set consisting of [decimals] @ [upper] @ [lower] *)
 
 val symbols : char list
-(** See {{!generate_password}generate_password}.
+(** See {{!generate_passphrase}generate_passphrase}.
     A set of various symbols reachable on a US keyboard. *)
 
 val all_chars : char list
-(** See {{!generate_password}generate_password}.
+(** See {{!generate_passphrase}generate_passphrase}.
     The set consisting of [alphanum] @ [symbols]*)
 
 (** {1:encryption Dealing with en-/decryption:} *)
@@ -79,19 +79,19 @@ val encrypt_category : plain_category -> (crypt_category, [> R.msg]) result
     error if [encryption_key] is None *)
 
 val decrypt_category :
-  pass:string ->
+  passphrase:string ->
   crypt_category ->
   (plain_category, [> R.msg ]) result
 (** [decrypt_category ~key encrypted] is [encrypted] decrypted using [key].
     The key is stored in the result so that it may be re-encrypted again using
     {{!encrypt_category}encrypt_category}.*)
 
-val serialize_state : pass:string -> state -> (string, [> R.msg ]) result
+val serialize_state : passphrase:string -> state -> string
 (** [serialize_state ~key state] is the [state] encrypted with [key] and
     serialized to a string. *)
 
 
-val unserialize_state : pass:string -> string ->
+val unserialize_state : passphrase:string -> string ->
   (state, [> R.msg ]) result
 (** [unserialize_state ~key encrypted] is the state tree decrypted from
     [encrypted] using [key]. *)

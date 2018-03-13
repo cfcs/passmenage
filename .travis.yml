@@ -1,5 +1,6 @@
 env:
   global:
+    - PINS="pbkdf:https://github.com/abeaumont/ocaml-pbkdf.git#master"
     - PACKAGE="passmenage"
     - OPAMNOCHECKSUMS=true
   matrix:

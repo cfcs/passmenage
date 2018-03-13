@@ -1,4 +1,9 @@
-type encrypted_data = { kdf : string ; (* scrypt encryption stuff*)
+type key_slot = { salt : string ;  (* scrypt salt *)
+                  nonce : string ; (* symmetric cipher nonce *)
+                  ciphertext : string ; (* encrypted master key *)
+                }
+
+type encrypted_data = { slots : key_slot list ;
                         nonce: Cstruct.t ;
                         ciphertext: Cstruct.t ;
                       }
@@ -52,38 +57,71 @@ let pp_state fmt s =
 
 open Rresult
 
-let encrypt ~pass json : (encrypted_data, [> R.msg]) result=
-  let key_cs = Nocrypto.Rng.generate 32 in
-  let key = Nocrypto.Cipher_block.AES.CCM.of_secret ~maclen:16 key_cs in
-  Scrypt.encrypt ~maxmem:1_000_000
-                 ~maxtime:1.0
-                 (Cstruct.to_string key_cs) pass
-  |> R.of_option ~none:(fun () -> R.error_msg "Scrypt failed")
-  >>| fun kdf ->
+let hash ~salt ~passphrase =
+  Scrypt_kdf.scrypt_kdf ~salt
+    ~password:(Cstruct.of_string passphrase)
+    ~dk_len:32_l (* <-- output len, in bytes *)
+    (* how to use scrypt: https://stackoverflow.com/a/30308723 *)
+    (* memory consumption: ~128 bytes * N_cost * r_blockSizeFactor *)
+    (* memory consumed: 128 * 16 KB * 9 = 18.5 MB. *)
+    (* n is the iteration count, and p is the amount of times you run
+       the algorithm*)
+    (* This takes ~7s on my machine:*)
+    ~n:(16384) ~r:9 ~p:6
+
+let encrypt_data ~key plaintext =
   Nocrypto.Cipher_block.AES.CCM.(
-    let nonce = Nocrypto.Rng.generate 13
-    (* 13 bytes as documented in nocrypto/src/ccm.ml line 28:
+    let nonce = Nocrypto.Rng.generate 13 in
+    (* ^-- 13 bytes as documented in nocrypto/src/ccm.ml line 28:
          let format nonce adata q t (* mac len *) =
          (* assume n <- [7..13] *)
     *)
-    in
-    let todo =
-      { kdf;
-        nonce;
-        ciphertext = encrypt ~key ~nonce (Yojson.Basic.to_string json
-                                          |> Cstruct.of_string)
-    } in
-      Logs.debug (fun m -> m "nonce:%a@ @,ciphertext: %a"
-                 Cstruct.hexdump_pp todo.nonce
-                 Cstruct.hexdump_pp todo.ciphertext
-             ); todo
+    nonce, encrypt ~key ~nonce plaintext )
+
+let decrypt_data ~nonce ~key ciphertext =
+  Nocrypto.Cipher_block.AES.CCM.(
+    decrypt ~nonce ~key ciphertext
+  ) |> R.of_option ~none:(fun () -> R.error_msg "Decryption failed")
+
+let encrypt_slot ~passphrase master_key_plaintext : key_slot =
+  let salt = Nocrypto.Rng.generate 16 in
+  let key = hash ~passphrase ~salt
+            |> Nocrypto.Cipher_block.AES.CCM.of_secret ~maclen:16 in
+  let nonce, ciphertext = encrypt_data ~key master_key_plaintext in
+  { salt       = Cstruct.to_string salt ;
+    nonce      = Cstruct.to_string nonce ;
+    ciphertext = Cstruct.to_string ciphertext }
+
+let decrypt_slot ~passphrase ~salt ~nonce ~ciphertext =
+  let key = hash ~passphrase ~salt:(Cstruct.of_string salt)
+            |> Nocrypto.Cipher_block.AES.CCM.of_secret ~maclen:16 in
+  let nonce  = Cstruct.of_string nonce in
+  let ciphertext = Cstruct.of_string ciphertext in
+  decrypt_data ~nonce ~key ciphertext
+
+let encrypt ~passphrase json : encrypted_data =
+  let master_key = Nocrypto.Rng.generate 32 in
+  let slot = encrypt_slot ~passphrase master_key in
+  Nocrypto.Cipher_block.AES.CCM.(
+    let nonce, ciphertext =
+      encrypt_data ~key:(of_secret ~maclen:16 master_key)
+        (Yojson.Basic.to_string json
+         |> Cstruct.of_string) in
+    Logs.debug (fun m -> m "nonce:%a@ @,ciphertext: %a"
+                   Cstruct.hexdump_pp nonce
+                   Cstruct.hexdump_pp ciphertext
+               );
+    { slots = [ slot ] ;
+      nonce;
+      ciphertext
+    }
   )
 
-let decrypt ~pass {kdf; nonce;ciphertext}
+let decrypt ~passphrase {slots; nonce; ciphertext}
   : (Yojson.Basic.json, [> R.msg]) result =
-  R.of_option ~none:(fun () -> R.error_msg "wrong password")
-    (Scrypt.decrypt kdf pass) >>| Cstruct.of_string
-  >>| (Nocrypto.Cipher_block.AES.CCM.of_secret ~maclen:16) >>= fun key ->
+  ( let { salt ; nonce ; ciphertext } = List.hd slots in (* TODO *)
+    decrypt_slot ~salt ~nonce ~ciphertext ~passphrase
+  ) >>| (Nocrypto.Cipher_block.AES.CCM.of_secret ~maclen:16) >>= fun key ->
   match Nocrypto.Cipher_block.AES.CCM.decrypt ~key ~nonce ciphertext with
   | None -> R.error_msg "Unable to decrypt"
   | Some plaintext_cs ->
@@ -103,9 +141,16 @@ let json_of_entry {passphrase; name; metadata} : Yojson.Basic.json =
            "passphrase", `String passphrase;
            "metadata", `Assoc (List.map (fun (k,v) -> k, `String v) metadata);
          ]
-let json_of_encrypted_data {nonce; ciphertext; kdf} : Yojson.Basic.json =
+
+let json_of_key_slot { salt; nonce ; ciphertext } =
+  `Assoc [ "salt", `String salt ;
+           "nonce", `String nonce ;
+           "ciphertext", `String ciphertext ;
+         ]
+
+let json_of_encrypted_data {nonce; ciphertext; slots} : Yojson.Basic.json =
   `Assoc [ "nonce", `String (Cstruct.to_string nonce) ;
-           "kdf", `String kdf ;
+           "slots", `List (List.map json_of_key_slot slots) ;
            "ciphertext", `String (Cstruct.to_string ciphertext) ;
   ]
 
@@ -125,8 +170,8 @@ let rec json_of_category (cat: category) : Yojson.Basic.json =
         | None ->
           [ "entries", plain_entries ;
             "subcategories", `List (List.map json_of_category subcategories)]
-      | Some pass ->
-        json_of_encrypted_data (encrypt ~pass plain_entries |> R.get_ok) (*TODO*)
+      | Some passphrase ->
+        json_of_encrypted_data (encrypt ~passphrase plain_entries)
         |> wrap_encrypted
       end
     | Crypt_category {category_ciphertext; name = _ } ->
@@ -188,16 +233,27 @@ let entry_of_json json =
 
 let encrypted_data_of_json
   : Yojson.Basic.json -> (encrypted_data, [> R.msg ])result = function
-  | `Assoc hay ->
-    three_assoc_of_json ("nonce","ciphertext","kdf")
-      (get_json_str, get_json_str, get_json_str)
-      hay
-    >>= fun (nonce, ciphertext, kdf) ->
-      Ok { ciphertext = Cstruct.of_string ciphertext ;
-           nonce = Cstruct.of_string nonce ;
-           kdf}
-    | json -> R.error_msg (Fmt.strf "invalid encrypted_data json: %a"
-                          Yojson.Basic.(pretty_print ~std:true) json)
+  | `Assoc dict ->
+    three_assoc_of_json ("nonce","ciphertext","slots")
+      (get_json_str, get_json_str, get_json_list)
+      dict
+    >>= fun (nonce, ciphertext, slots ) ->
+    let json_of_slot = function
+      | `Assoc dict ->
+        three_assoc_of_json ("salt", "nonce", "ciphertext")
+          (get_json_str, get_json_str, get_json_str)
+          dict >>| fun (salt,nonce,ciphertext) ->
+        {salt ; nonce; ciphertext}
+      | json -> R.error_msgf "Invalid slot: %a"
+               Yojson.Basic.(pretty_print ~std:true) json
+    in
+    fold_result json_of_slot slots
+      >>= fun slots ->
+    Ok { ciphertext = Cstruct.of_string ciphertext ;
+         nonce = Cstruct.of_string nonce ;
+         slots }
+  | json -> R.error_msg (Fmt.strf "invalid encrypted_data json: %a"
+                           Yojson.Basic.(pretty_print ~std:true) json)
 
 let rec category_of_json (json:Yojson.Basic.json)
   : (category, [> R.msg ]) result =
@@ -231,47 +287,49 @@ let state_of_json json : (state, [> R.msg] ) result =
     {categories; conf}
   | _ -> R.error_msg "invalid state json"
 
-let encrypt_state ~pass (state : state) =
-  (encrypt ~pass (json_of_state state))
+let encrypt_state ~passphrase (state : state) =
+  encrypt ~passphrase (json_of_state state)
 
-let decrypt_state ~pass (enc_state) =
-  decrypt ~pass enc_state >>= state_of_json
+let decrypt_state ~passphrase (enc_state) =
+  decrypt ~passphrase enc_state >>= state_of_json
 
-let serialize_state ~pass (state) =
-  encrypt_state ~pass state >>| fun enc_data ->
-  json_of_encrypted_data enc_data |> Yojson.Basic.to_string
+let serialize_state ~passphrase (state) =
+  encrypt_state ~passphrase state
+  |> json_of_encrypted_data
+  |> Yojson.Basic.to_string
 
-let unserialize_state ~pass str =
+let unserialize_state ~passphrase str =
   match Yojson.Basic.from_string str with
   | exception _ -> R.error_msg "invalid json"
   | json ->
-    encrypted_data_of_json json >>= decrypt_state ~pass
+    encrypted_data_of_json json >>= decrypt_state ~passphrase
 
 let encrypt_category ({name; entries; subcategories; encryption_key})
   : (crypt_category, 'err) result =
   match encryption_key with
   | None -> R.error_msg "encrypt_category: no encryption key provided"
-  | Some pass ->
+  | Some passphrase ->
     Ok {name ;
         category_ciphertext =
-          encrypt ~pass
+          encrypt ~passphrase
             (`Assoc
                ["entries", `List (List.map json_of_entry entries) ;
                 "subcategories", `List (List.map json_of_category subcategories)
                ])
-          |> R.get_ok} (*TODO*)
+       }
 
-let decrypt_category ~pass ({name; category_ciphertext}) =
-  decrypt ~pass category_ciphertext >>= begin function
+let decrypt_category ~passphrase ({name; category_ciphertext}) =
+  decrypt ~passphrase category_ciphertext >>= begin function
     | `Assoc ["entries", `List json_ent_lst;
               "subcategories", `List json_subcat_lst ] ->
       fold_result entry_of_json json_ent_lst >>| fun entries ->
-      {name; entries; encryption_key = Some pass; subcategories = [] }
+      {name; entries; encryption_key = Some passphrase; subcategories = [] }
     | _ -> R.error_msg "fucked json after decrypting json"
   end
 
-let generate_password len (alphabet : char list) : (string, [> R.msg]) result=
-  begin if len < 0 then R.error_msg "generate_password: length must be positive"
+let generate_passphrase len (alphabet : char list) : (string, [> R.msg]) result=
+  begin if len < 0
+    then R.error_msg "generate_passphrase: length must be positive"
     else Ok () end >>= fun _ ->
   R.ok @@ String.init len (fun _ ->
       Nocrypto.Rng.Int.gen_r 0 (List.length alphabet)

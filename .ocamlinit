@@ -1,7 +1,7 @@
 #require "nocrypto.unix";;
 #require "rresult";;
 #require "yojson";;
-#require "scrypt";;
+#require "scrypt-kdf";;
 #require "fmt.top";;
 #mod_use "lib/passmenage.ml";;
 open Rresult;;

@@ -12,7 +12,7 @@ let plain_cat = {name="cat name"; entries = [entry];
                  subcategories = [] ; encryption_key = None}
 let crypt_cat = {name="cryptocat"; entries = [entry];
                  subcategories = [] ;
-                 encryption_key = Some (generate_password 10 all_chars
+                 encryption_key = Some (generate_passphrase 10 all_chars
                                         |> R.get_ok)
                 }
 let cat = Plain_category plain_cat
@@ -51,16 +51,16 @@ let test_encrypt_category () =
     "encrypt_category |> decrypt_category"
     (Ok (Plain_category crypt_cat))
     (encrypt_category crypt_cat
-     >>= decrypt_category ~pass:(match crypt_cat.encryption_key with
+     >>= decrypt_category ~passphrase:(match crypt_cat.encryption_key with
          | Some x -> x | None -> failwith "crypt_cat doesn't have a key")
      >>| fun plain -> Plain_category plain)
 
 let test_serialize_state () =
-  let pass = generate_password 10 all_chars |> R.get_ok in
+  let passphrase = generate_passphrase 10 all_chars |> R.get_ok in
   Alcotest.(check @@ result a_state a_msg)
     "serialize_state |> unserialize_state"
     (Ok state)
-    (serialize_state ~pass state >>= unserialize_state ~pass)
+    (serialize_state ~passphrase state |> unserialize_state ~passphrase)
 
 let tests =
   [

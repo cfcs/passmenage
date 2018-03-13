@@ -4,10 +4,10 @@ let file_read name =
   Bos.OS.File.read name
   |> R.reword_error (fun _ -> R.msgf "Can't open %a for reading" Fpath.pp name)
 
-let prompt_password ?prompt () : string =
+let prompt_passphrase ?prompt () : string =
   if Unix.isatty (Unix.descr_of_in_channel stdin)
   then Printf.eprintf "%s: %!" (match prompt with Some x -> x
-                                                | None -> "Enter password") ;
+                                                | None -> "Enter passphrase") ;
   if Unix.isatty (Unix.descr_of_out_channel stdout)
   then begin
     let open Unix in
@@ -24,26 +24,27 @@ let prompt_password ?prompt () : string =
   Logs.debug (fun m -> m "read: %S" pw);
   pw
 
-let enter_password_confirm ?prompt () : (string, [> R.msg]) result =
-  let pw = prompt_password ?prompt () in
-  let confirm = prompt_password ~prompt:"Confirm" () in
+let enter_passphrase_confirm ?prompt () : (string, [> R.msg]) result =
+  let pw = prompt_passphrase ?prompt () in
+  let confirm = prompt_passphrase ~prompt:"Confirm" () in
   if pw = confirm
   then Ok pw
-  else R.error_msg "Password mismatch"
+  else R.error_msg "Passphrase mismatch"
 
 let read_db ~db_file =
   file_read db_file >>= fun content ->
-  prompt_password ~prompt:"Enter password for state file" () |> fun pass ->
-  Passmenage.unserialize_state ~pass content >>| fun state ->
-  (pass, state)
+  prompt_passphrase ~prompt:"Enter passphrase for state file" ()
+  |> fun passphrase ->
+  Passmenage.unserialize_state ~passphrase content >>| fun state ->
+  (passphrase, state)
 
 let do_prettyprint _ (db_file:Fpath.t) =
   read_db ~db_file >>= fun (_key , state) ->
   Logs.app (fun m -> m "%a" Passmenage.pp_state state); Ok ()
 
 let do_init _ (new_file:Fpath.t) =
-  Logs.app (fun m -> m "Hello, I'm your password manager, I'm going to \
-                        initialize a new password file in %a"
+  Logs.app (fun m -> m "Hello, I'm your passphrase manager, I'm going to \
+                        initialize a new passphrase file in %a"
                Fpath.pp new_file);
   (Bos.OS.File.exists new_file >>= function
     | true -> R.error_msgf "File %a exists" Fpath.pp new_file
@@ -51,21 +52,21 @@ let do_init _ (new_file:Fpath.t) =
   ) >>= fun () ->
   let open Passmenage in
   let state = {conf = []; categories = []} in
-  enter_password_confirm () >>= fun pass ->
-  Passmenage.serialize_state ~pass state >>= fun serialized ->
+  enter_passphrase_confirm () >>= fun passphrase ->
+  let serialized = Passmenage.serialize_state ~passphrase state in
   Bos.OS.File.write new_file serialized
 
-let put_password_in_xclip pw =
+let put_passphrase_in_xclip pw =
   (* has xclip, make it delete after first paste *)
   let pw_as_pipe = Bos.OS.Cmd.in_string pw in
   Bos.(pw_as_pipe |> OS.Cmd.run_in
        @@ Cmd.of_list ["xclip"; "-i"; "-l"; "1"; "-selection"; "clipboard"])
 
-let put_password_in_xsel pw =
+let put_passphrase_in_xsel pw =
   let pw_as_pipe = Bos.OS.Cmd.in_string pw in
   let timeout = 17 in
   Printf.eprintf
-    "Waiting for %d seconds, then clearing your password.\n%!" timeout ;
+    "Waiting for %d seconds, then clearing your passphrase.\n%!" timeout ;
   Bos.(pw_as_pipe |> OS.Cmd.run_in
        @@ Cmd.of_list ["xsel";"-ibt";
                        (string_of_int timeout) ^ "000"])
@@ -87,14 +88,14 @@ let do_get _ db_file cat entry_name clipboard_xsel =
   get_category state cat >>=
   (function
     | Plain_category c -> Ok c
-    | Crypt_category c -> let pass = prompt_password () in
-                          decrypt_category ~pass c
+    | Crypt_category c -> let passphrase = prompt_passphrase () in
+                          decrypt_category ~passphrase c
   ) >>= fun cat ->
   get_entry cat entry_name >>= fun entry ->
   match clipboard_xsel with
     | true -> Bos.OS.Cmd.exists @@ Bos.Cmd.of_list ["xclip"]
-      >>= (function | true ->  put_password_in_xclip entry.passphrase
-                    | false -> put_password_in_xsel  entry.passphrase)
+      >>= (function | true ->  put_passphrase_in_xclip entry.passphrase
+                    | false -> put_passphrase_in_xsel  entry.passphrase)
     | false ->
       Logs.app (fun m -> m "%s" entry.passphrase) |> R.ok
 
@@ -110,8 +111,8 @@ let do_list _ db_file opt_cat =
     | Some cat_name ->
       get_category state cat_name
       >>= ( function
-          | Crypt_category c -> let pass = prompt_password () in
-                                decrypt_category ~pass c
+          | Crypt_category c -> let passphrase = prompt_passphrase () in
+                                decrypt_category ~passphrase c
           | Plain_category c -> Ok c
         ) >>| fun (cat : plain_category) ->
       Logs.app (fun m -> m "Category \"%s\":    @[<v>%a@]" cat.name
@@ -136,10 +137,10 @@ let do_add _ db_file cat entry_name generate charset =
        (new_cat, new_state)
     | Ok (Plain_category category) -> Ok (category, state)
     | Ok (Crypt_category c) ->
-      let pass = prompt_password
-          ~prompt:("Enter password for category '" ^ c.name ^ "'")
+      let passphrase = prompt_passphrase
+          ~prompt:("Enter passphrase for category '" ^ c.name ^ "'")
           () in
-      decrypt_category ~pass c >>| fun c ->
+      decrypt_category ~passphrase c >>| fun c ->
       (c, state)
   end >>= fun (category, state) ->
   begin match get_entry category entry_name with
@@ -148,11 +149,11 @@ let do_add _ db_file cat entry_name generate charset =
      | Error _ -> Ok ()
   end >>= fun () ->
   (if generate
-   then generate_password 16
+   then generate_passphrase 16
        (match charset with
         | Some sets -> List.(flatten sets |> sort_uniq compare)
         | None -> alphanum)
-   else enter_password_confirm ~prompt:"Enter password to store" ()
+   else enter_passphrase_confirm ~prompt:"Enter passphrase to store" ()
   ) >>= fun passphrase ->
   insert_new_entry category
        { name = entry_name ;
@@ -161,7 +162,7 @@ let do_add _ db_file cat entry_name generate charset =
        }
   >>| (fun cat -> update_category state cat)
   >>| (fun s -> Logs.info (fun m -> m "%a" pp_state s); s)
-  >>= serialize_state ~pass
+  >>| (serialize_state ~passphrase)
   >>= Bos.OS.File.write db_file
 
 open Cmdliner
@@ -180,7 +181,7 @@ let fpath_conv : Fpath.t Cmdliner.Arg.conv =
   ), Fpath.pp
 
 let db_file =
-  let doc = {|The path to the password database file|} in
+  let doc = {|The path to the passphrase database file|} in
   Arg.(value & opt fpath_conv default_db_file
        & info ["db"] ~docv:"FILE" ~docs ~doc)
 
@@ -197,7 +198,7 @@ let (category : string  Cmdliner.Term.t),
     value & pos 0 (some string) None & info [] ~docv:"CATEGORY" ~docs ~doc)
 
 let entry, opt_entry =
-  let doc = {| A password entry name |} in
+  let doc = {| A passphrase entry name |} in
   Arg.(
     required & pos 1 (some string) None & info [] ~docv:"ENTRY-NAME" ~docs ~doc,
     value & pos 1 (some string) None & info [] ~docv:"ENTRY-NAME" ~docs ~doc)
@@ -210,7 +211,7 @@ let clipboard : bool Cmdliner.Term.t =
   Arg.(value & flag & info ["clipboard"] ~docv:"WATT" ~docs ~doc)
 
 let generate : bool Cmdliner.Term.t =
-  let doc = {| Automatically generate a password |} in
+  let doc = {| Automatically generate a passphrase |} in
   Arg.(value & flag & info ["generate"] ~docv:"ENTRY" ~docs ~doc)
 
 let charsets, charset_enum =
@@ -247,7 +248,7 @@ let cmd_add =
   let doc = {|Add an entry to a category.|} in
   let man =
     [ `S Manpage.s_description ;
-      `P {|Add a password entry to your password file.|} ;
+      `P {|Add a passphrase entry to your passphrase file.|} ;
     ] in
   Term.(term_result
           (const do_add $ setup_log
@@ -255,17 +256,17 @@ let cmd_add =
   Term.info "add" ~doc ~sdocs ~exits:Term.default_exits ~man
 
 let cmd_prettyprint =
-  let doc = {|Pretty-print the state (INCLUDING PASSWORDS) |} in
+  let doc = {|Pretty-print the state (INCLUDING PASSPHRASES) |} in
   let man =
     [ `S Manpage.s_description ;
-      `P {|Pretty-print the entire state (including passwords) in JSON.
-           This can be used to export your passwords.|}
+      `P {|Pretty-print the entire state (including passphrases) in JSON.
+           This can be used to export your passphrases.|}
   ] in
   Term.(term_result (const do_prettyprint $ setup_log $ db_file)),
   Term.info "pretty-print" ~doc ~sdocs ~exits:Term.default_exits ~man
 
 let cmd_init =
-  let doc = {|Initialize a new password file|} in
+  let doc = {|Initialize a new passphrase file|} in
   let man =
     [ `S Manpage.s_description ;
       `P (Fmt.strf {|
@@ -277,9 +278,9 @@ let cmd_init =
   Term.info "init" ~doc ~sdocs ~exits:Term.default_exits ~man
 
 let cmd_get =
-  let doc = {|Get an entry from the password file.|} in
+  let doc = {|Get an entry from the passphrase file.|} in
   let man = [ `S Manpage.s_description ;
-              `P {|Prints a password to $(i,STDOUT) if the optional argument
+              `P {|Prints a passphrase to $(i,STDOUT) if the optional argument
                    $(i,--clipboard) is not given.|}
   ] in
   Term.(term_result (const do_get $ setup_log
@@ -295,7 +296,7 @@ let cmd_list =
   Term.info "list" ~doc ~sdocs ~exits:Term.default_exits ~man
 
 let cmd_help =
-  let doc = {|$(mname) is a command-line interface to the PassMenage password
+  let doc = {|$(mname) is a command-line interface to the PassMenage passphrase
               manager library.|} in
   let man =
     [ `S Manpage.s_description ;

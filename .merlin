@@ -6,6 +6,7 @@ PKG bos
 PKG fpath
 
 # for the library:
+PKG scrypt-kdf
 PKG cstruct
 PKG logs
 PKG nocrypto
