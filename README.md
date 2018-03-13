@@ -1,5 +1,4 @@
-# Work-in-progress: PassMenage
-![Build status](https://travis-ci.org/cfcs/passmenage.svg?branch=master)
+# Work-in-progress: PassMenage [![Build Status](https://travis-ci.org/cfcs/passmenage.svg?branch=master)](https://travis-ci.org/cfcs/passmenage)
 
 This is a password manager library implementing basic operations on a data
 structure that can be used to store passwords.
