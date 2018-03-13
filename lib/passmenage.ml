@@ -34,21 +34,26 @@ let pp_configuration fmt conf =
   Fmt.pf fmt "[@[<v>%a@]]"
     Fmt.(list @@ pair ~sep:(unit ", ") string string) conf
 
-let pp_entry fmt (e:entry) =
+let pp_entry fmt { name ; passphrase ; metadata } =
   Fmt.pf fmt "{@[<v>\"name\": %S,@ \"passphrase\": %S,@ \"metadata\": [%a]@]}"
-    e.name e.passphrase
-    Fmt.(list @@ pair ~sep:(unit ", ") string string) e.metadata
+    name passphrase
+    Fmt.(list @@ pair ~sep:(unit ", ") string string) metadata
 
 let pp_crypto_key fmt (_:string) = Fmt.pf fmt "[ENCRYPTION KEY]"
-let pp_category fmt c: unit =
+
+let rec pp_category fmt c : unit =
   match c with
-  | Crypt_category c ->
-    Fmt.pf fmt "{\"name\": %S,@ \"entries\": \"ENCRYPTED\"}" c.name
-  | Plain_category c ->
-    Fmt.pf fmt "{@[<v>\"name\": %S,@ \"entries\": [@[<v>%a@]],\
-                                   @ \"key\": %a@]}" c.name
-      Fmt.(list ~sep:(unit ",@,") pp_entry) c.entries
-      Fmt.(option ~none:(unit "\"\"") pp_crypto_key) c.encryption_key
+  | Crypt_category { name ; category_ciphertext = _ } ->
+    Fmt.pf fmt "{\"name\": %S,@ \"entries\": \"ENCRYPTED\"}" name
+  | Plain_category { name ; entries; subcategories ; encryption_key } ->
+    Fmt.pf fmt "{@[<v>\"name\": %S,\
+                @ \"entries\": [@[<v>%a@]],\
+                @ \"key\": %a,\
+                @ \"subcategories\": [@[<v>%a@]]@]}"
+      name
+      Fmt.(list ~sep:(unit ",@,") pp_entry) entries
+      Fmt.(option ~none:(unit "\"\"") pp_crypto_key) encryption_key
+      Fmt.(list pp_category) subcategories
 
 let pp_state fmt s =
   Fmt.pf fmt "{@[\"configuration\": @[<v>%a@],@,\"categories\": [@[<v>%a@]]@]}"
@@ -81,7 +86,9 @@ let encrypt_data ~key plaintext =
 let decrypt_data ~nonce ~key ciphertext =
   Nocrypto.Cipher_block.AES.CCM.(
     decrypt ~nonce ~key ciphertext
-  ) |> R.of_option ~none:(fun () -> R.error_msg "Decryption failed")
+  ) |> R.of_option
+    ~none:(fun () ->
+        R.error_msgf "Decryption failed: %a" Cstruct.hexdump_pp ciphertext)
 
 let encrypt_slot ~passphrase master_key_plaintext : key_slot =
   let salt = Nocrypto.Rng.generate 16 in
@@ -122,6 +129,7 @@ let decrypt ~passphrase {slots; nonce; ciphertext}
   ( let { salt ; nonce ; ciphertext } = List.hd slots in (* TODO *)
     decrypt_slot ~salt ~nonce ~ciphertext ~passphrase
   ) >>| (Nocrypto.Cipher_block.AES.CCM.of_secret ~maclen:16) >>= fun key ->
+  Logs.debug (fun m -> m "decrypt: got a slot");
   match Nocrypto.Cipher_block.AES.CCM.decrypt ~key ~nonce ciphertext with
   | None -> R.error_msg "Unable to decrypt"
   | Some plaintext_cs ->
@@ -165,14 +173,17 @@ let rec json_of_category (cat: category) : Yojson.Basic.json =
   in
   begin match cat with
     | Plain_category {entries; subcategories; encryption_key; name = _} ->
-      let plain_entries = `List (List.map json_of_entry entries) in
+      let plain =
+        let plain_entries = `List (List.map json_of_entry entries) in
+        let plain_subcategories = List.map json_of_category subcategories in
+        [ "entries", plain_entries ;
+          "subcategories", `List plain_subcategories]
+      in
       begin match encryption_key with
-        | None ->
-          [ "entries", plain_entries ;
-            "subcategories", `List (List.map json_of_category subcategories)]
-      | Some passphrase ->
-        json_of_encrypted_data (encrypt ~passphrase plain_entries)
-        |> wrap_encrypted
+        | None -> plain
+        | Some passphrase ->
+          json_of_encrypted_data (encrypt ~passphrase (`Assoc plain))
+          |> wrap_encrypted
       end
     | Crypt_category {category_ciphertext; name = _ } ->
       wrap_encrypted (json_of_encrypted_data category_ciphertext)
@@ -318,13 +329,15 @@ let encrypt_category ({name; entries; subcategories; encryption_key})
                ])
        }
 
-let decrypt_category ~passphrase ({name; category_ciphertext}) =
+let decrypt_category ~passphrase {name; category_ciphertext} =
   decrypt ~passphrase category_ciphertext >>= begin function
     | `Assoc ["entries", `List json_ent_lst;
               "subcategories", `List json_subcat_lst ] ->
-      fold_result entry_of_json json_ent_lst >>| fun entries ->
-      {name; entries; encryption_key = Some passphrase; subcategories = [] }
-    | _ -> R.error_msg "fucked json after decrypting json"
+      fold_result entry_of_json json_ent_lst >>= fun entries ->
+      fold_result category_of_json json_subcat_lst >>| fun subcategories ->
+      {name; entries; encryption_key = Some passphrase; subcategories }
+    | json -> R.error_msgf "fucked json after decrypting json: %a"
+                (Yojson.Basic.pretty_print ~std:true) json
   end
 
 let generate_passphrase len (alphabet : char list) : (string, [> R.msg]) result=

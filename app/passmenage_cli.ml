@@ -124,7 +124,7 @@ let do_list _ db_file opt_cat =
   end
 
 let do_add _ db_file cat entry_name generate charset =
-  read_db ~db_file >>= fun (pass,state) ->
+  read_db ~db_file >>= fun (state_passphrase,state) ->
   let open Passmenage in
   begin match get_category state cat with
      | Error _ ->
@@ -162,7 +162,14 @@ let do_add _ db_file cat entry_name generate charset =
        }
   >>| (fun cat -> update_category state cat)
   >>| (fun s -> Logs.info (fun m -> m "%a" pp_state s); s)
-  >>| (serialize_state ~passphrase)
+  >>| (serialize_state ~passphrase:state_passphrase)
+  >>= (fun enc -> unserialize_state ~passphrase:state_passphrase enc
+        >>| fun _ ->
+        Logs.debug (fun m -> m "self-check went well, writing:@ %S"
+                       enc
+                   );
+        enc
+      ) (* don't write if we can't decrypt *)
   >>= Bos.OS.File.write db_file
 
 open Cmdliner
